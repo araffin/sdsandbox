@@ -1,30 +1,29 @@
 #!/usr/bin/env python
-'''
+"""
 Predict Server
 Create a server to accept image inputs and run them against a trained neural network.
 This then sends the steering output back to the client.
 Author: Tawn Kramer
-'''
+"""
 from __future__ import print_function
-import os
+
 import argparse
-import sys
+import base64
+import os
+import shutil
 import time
 from datetime import datetime
-import shutil
-import base64
+from io import BytesIO
 
-import numpy as np
-import socketio
 import eventlet
 import eventlet.wsgi
+import numpy as np
+import socketio
 from PIL import Image
 from flask import Flask
-from io import BytesIO
 from tensorflow import keras
 
-import conf
-import throttle_manager
+from . import conf, throttle_manager
 
 
 class FPSTimer(object):
@@ -44,13 +43,14 @@ class FPSTimer(object):
             self.t = time.time()
             self.iter = 0
 
+
 class SteeringServer(object):
-    def __init__(self, _sio, image_folder = None, image_cb = None):
+    def __init__(self, _sio, image_folder=None, image_cb=None):
         self.model = None
         self.timer = FPSTimer()
         self.sio = _sio
         self.app = Flask(__name__)
-        self.throttle_man = throttle_manager.ThrottleManager(idealSpeed = 10.)
+        self.throttle_man = throttle_manager.ThrottleManager(idealSpeed=10.)
         self.image_cb = image_cb
         self.image_folder = image_folder
 
@@ -73,17 +73,17 @@ class SteeringServer(object):
 
             outputs = self.model.predict(image_array[None, :, :, :])
 
-            #steering
+            # steering
             steering_angle = outputs[0][0]
 
-            #do we get throttle from our network?
+            # do we get throttle from our network?
             if conf.num_outputs == 2 and len(outputs[0]) == 2:
                 throttle = outputs[0][1]
             else:
-                #set throttle value here
+                # set throttle value here
                 throttle, brake = self.throttle_man.get_throttle_brake(speed, steering_angle)
 
-            #print(steering_angle, throttle)
+            # print(steering_angle, throttle)
             self.send_control(steering_angle, throttle)
 
             # save frame
@@ -112,10 +112,10 @@ class SteeringServer(object):
             skip_sid=True)
 
     def go(self, model_fnm, address):
-        
+
         self.model = keras.models.load_model(model_fnm)
 
-        #In this mode, looks like we have to compile it
+        # In this mode, looks like we have to compile it
         self.model.compile("sgd", "mse")
 
         # wrap Flask application with engineio's middleware
@@ -125,12 +125,11 @@ class SteeringServer(object):
         try:
             eventlet.wsgi.server(eventlet.listen(address), self.app)
         except KeyboardInterrupt:
-            #unless some hits Ctrl+C and then we get this interrupt
+            # unless some hits Ctrl+C and then we get this interrupt
             print('stopping')
 
 
 def run_steering_server(address, model_fnm, image_folder=None, image_cb=None):
-
     sio = socketio.Server()
 
     ss = SteeringServer(sio, image_cb=image_cb, image_folder=image_folder)
@@ -145,17 +144,18 @@ def run_steering_server(address, model_fnm, image_folder=None, image_cb=None):
 
     ss.go(model_fnm, address)
 
+
 # ***** main loop *****
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='prediction server')
     parser.add_argument('model', type=str, help='model name')
     parser.add_argument(
-          'image_folder',
-          type=str,
-          nargs='?',
-          default=None,
-          help='Path to image folder. This is where the images from the run will be saved.'
-      )
+        'image_folder',
+        type=str,
+        nargs='?',
+        default=None,
+        help='Path to image folder. This is where the images from the run will be saved.'
+    )
 
     args = parser.parse_args()
 
@@ -171,4 +171,3 @@ if __name__ == "__main__":
     model_fnm = args.model
     address = ('0.0.0.0', 9090)
     run_steering_server(address, model_fnm, image_folder=args.image_folder)
-    

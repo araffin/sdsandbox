@@ -1,37 +1,29 @@
 #!/usr/bin/env python
-'''
+"""
 Predict Server
 Create a server to accept image inputs and run them against a trained neural network.
 This then sends the steering output back to the client.
 Author: Tawn Kramer
-'''
+"""
 from __future__ import print_function
-import os
+
 import argparse
-import sys
-import json
+import base64
+import os
+import shutil
 import time
 from datetime import datetime
-import asyncore
-import json
-import shutil
-import base64
-import random
+from io import BytesIO
 
-import numpy as np
-import h5py
-from PIL import Image
-import socketio
 import eventlet
 import eventlet.wsgi
+import numpy as np
+import socketio
 from PIL import Image
 from flask import Flask
-from io import BytesIO
 from tensorflow import keras
 
-import conf
-import throttle_manager
-
+from . import conf, throttle_manager
 
 sio = socketio.Server()
 app = Flask(__name__)
@@ -40,6 +32,7 @@ model = None
 iSceneToLoad = 0
 time_step = 0.1
 step_mode = "synchronous"
+
 
 class FPSTimer(object):
     def __init__(self):
@@ -58,7 +51,9 @@ class FPSTimer(object):
             self.t = time.time()
             self.iter = 0
 
+
 timer = FPSTimer()
+
 
 @sio.on('Telemetry')
 def telemetry(sid, data):
@@ -76,38 +71,38 @@ def telemetry(sid, data):
         image = Image.open(BytesIO(base64.b64decode(imgString)))
         image_array = np.asarray(image)
 
-        #name of object we just hit. "none" if nothing.
+        # name of object we just hit. "none" if nothing.
         hit = data["hit"]
 
         x = data["pos_x"]
         y = data["pos_y"]
         z = data["pos_z"]
 
-        #Cross track error not always present.
-        #Will be missing if path is not setup in the given scene.
-        #It should be setup in the 3 scenes available now.
+        # Cross track error not always present.
+        # Will be missing if path is not setup in the given scene.
+        # It should be setup in the 3 scenes available now.
         try:
             cte = data["cte"]
         except:
             pass
 
-        #print("x", x, "y", y, "cte", cte, "hit", hit)
+        # print("x", x, "y", y, "cte", cte, "hit", hit)
 
         outputs = model.predict(image_array[None, :, :, :])
 
-        #steering
+        # steering
         steering_angle = outputs[0][0]
 
-        #do we get throttle from our network?
+        # do we get throttle from our network?
         if conf.num_outputs == 2 and len(outputs[0]) == 2:
             throttle = outputs[0][1]
         else:
-            #set throttle value here
+            # set throttle value here
             throttle, brake = throttle_man.get_throttle_brake(speed, steering_angle)
-        
-        #print(steering_angle, throttle)
 
-        #reset scene to start if we hit anything.
+        # print(steering_angle, throttle)
+
+        # reset scene to start if we hit anything.
         if hit != "none":
             send_exit_scene()
         else:
@@ -117,12 +112,13 @@ def telemetry(sid, data):
         if args.image_folder != '':
             timestamp = datetime.utcnow().strftime('%Y_%m_%d_%H_%M_%S_%f')[:-3]
             image_filename = os.path.join(args.image_folder, timestamp)
-            #image.save('{}.jpg'.format(image_filename))
+            # image.save('{}.jpg'.format(image_filename))
     else:
         # NOTE: DON'T EDIT THIS.
         sio.emit('RequestTelemetry', data={}, skip_sid=True)
 
     timer.on_frame()
+
 
 @sio.on('connect')
 def connect(sid, environ):
@@ -132,23 +128,27 @@ def connect(sid, environ):
     global step_mode
     timer.reset()
 
-    send_settings({"step_mode" : step_mode.__str__(),\
-         "time_step" : time_step.__str__()})
-    
+    send_settings({"step_mode": step_mode.__str__(),
+                   "time_step": time_step.__str__()})
+
     send_control(0, 0)
+
 
 @sio.on('ProtocolVersion')
 def on_proto_version(sid, environ):
     print("ProtocolVersion ", sid)
+
 
 @sio.on('SceneSelectionReady')
 def on_fe_loaded(sid, environ):
     print("SceneSelectionReady ", sid)
     send_get_scene_names()
 
+
 @sio.on('SceneLoaded')
 def on_scene_loaded(sid, data):
     print("SceneLoaded ", sid)
+
 
 @sio.on('SceneNames')
 def on_scene_names(sid, data):
@@ -159,12 +159,14 @@ def on_scene_names(sid, data):
         global iSceneToLoad
         send_load_scene(names[iSceneToLoad])
 
+
 def send_get_scene_names():
     sio.emit(
         "GetSceneNames",
-        data={            
+        data={
         },
         skip_sid=True)
+
 
 def send_control(steering_angle, throttle):
     sio.emit(
@@ -175,6 +177,7 @@ def send_control(steering_angle, throttle):
         },
         skip_sid=True)
 
+
 def send_load_scene(scene_name):
     print("Loading", scene_name)
     sio.emit(
@@ -184,6 +187,7 @@ def send_load_scene(scene_name):
         },
         skip_sid=True)
 
+
 def send_exit_scene():
     sio.emit(
         "ExitScene",
@@ -192,18 +196,21 @@ def send_exit_scene():
         },
         skip_sid=True)
 
+
 def send_reset_car():
     sio.emit(
         "ResetCar",
-        data={            
+        data={
         },
         skip_sid=True)
+
 
 def send_settings(prefs):
     sio.emit(
         "Settings",
         data=prefs,
         skip_sid=True)
+
 
 def go(model_fnm, address, iScene):
     global model
@@ -212,20 +219,20 @@ def go(model_fnm, address, iScene):
 
     model = keras.models.load_model(model_fnm)
 
-    #In this mode, looks like we have to compile it
+    # In this mode, looks like we have to compile it
     model.compile("sgd", "mse")
 
     # wrap Flask application with engineio's middleware
     app = socketio.Middleware(sio, app)
 
-    #which scene to load
+    # which scene to load
     iSceneToLoad = iScene
 
     # deploy as an eventlet WSGI server
     try:
         eventlet.wsgi.server(eventlet.listen(address), app)
     except KeyboardInterrupt:
-        #unless some hits Ctrl+C and then we get this interrupt
+        # unless some hits Ctrl+C and then we get this interrupt
         print('stopping')
 
 
@@ -234,15 +241,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='sim_server')
     parser.add_argument('model', type=str, help='model name')
     parser.add_argument('--i_scene', default=0, help='which scene to load')
-    parser.add_argument('--step_mode', default="asynchronous", help='how to advance time in sim (asynchronous|synchronous)')
+    parser.add_argument('--step_mode', default="asynchronous",
+                        help='how to advance time in sim (asynchronous|synchronous)')
     parser.add_argument('--time_step', type=float, default=0.1, help='how far to advance time in sim when synchronous')
     parser.add_argument(
-          'image_folder',
-          type=str,
-          nargs='?',
-          default='',
-          help='Path to image folder. This is where the images from the run will be saved.'
-      )
+        'image_folder',
+        type=str,
+        nargs='?',
+        default='',
+        help='Path to image folder. This is where the images from the run will be saved.'
+    )
 
     args = parser.parse_args()
 
@@ -261,4 +269,3 @@ if __name__ == "__main__":
     model_fnm = args.model
     address = ('0.0.0.0', 9090)
     go(model_fnm, address, iScene)
-

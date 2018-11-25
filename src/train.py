@@ -1,23 +1,22 @@
-'''
+"""
 Train
 Train your nerual network
 Author: Tawn Kramer
-'''
+"""
 from __future__ import print_function
-import os
-import sys
-import glob
-import time
-import fnmatch
+
 import argparse
+import fnmatch
+import json
+import os
+import random
+
+
 import numpy as np
 from PIL import Image
 from tensorflow import keras
-import conf
-import random
-import augment
-import models
-import json
+
+from . import augment, conf, models
 
 '''
 matplotlib can be a pain to setup. So handle the case where it is absent. When present,
@@ -25,10 +24,12 @@ use it to generate a plot of training results.
 '''
 try:
     import matplotlib
+
     # Force matplotlib to not use any Xwindows backend.
     matplotlib.use('Agg')
 
     import matplotlib.pyplot as plt
+
     do_plot = True
 except:
     do_plot = False
@@ -47,30 +48,33 @@ def shuffle(samples):
         len_samples -= 1
     return ret_arr
 
+
 def parse_img_filepath(filepath):
     basename = os.path.basename(filepath)
 
-    #less .jpg
+    # less .jpg
     f = basename[:-4]
     f = f.split('_')
 
     steering = float(f[3])
     throttle = float(f[5])
-    
-    data = {'steering':steering, 'throttle':throttle }
+
+    data = {'steering': steering, 'throttle': throttle}
 
     return data
+
 
 def load_json(filename):
     with open(filename, "rt") as fp:
         data = json.load(fp)
     return data
 
+
 def generator(samples, batch_size=32, perc_to_augment=0.5):
-    '''
+    """
     Rather than keep all data in memory, we will make a function that keeps
     it's state and returns just the latest batch required via the yield command.
-    
+
     As we load images, we can optionally augment them in some manner that doesn't
     change their underlying meaning or features. This is a combination of
     brightness, contrast, sharpness, and color PIL image filters applied with random
@@ -78,16 +82,16 @@ def generator(samples, batch_size=32, perc_to_augment=0.5):
     opacity.
     We flip each image horizontally and supply it as a another sample with the steering
     negated.
-    '''
+    """
     num_samples = len(samples)
-    shadows = augment.load_shadow_images('./shadows/*.png')    
-    
-    while 1: # Loop forever so the generator never terminates
+    shadows = augment.load_shadow_images('./shadows/*.png')
+
+    while 1:  # Loop forever so the generator never terminates
         samples = shuffle(samples)
-        #divide batch_size in half, because we double each output by flipping image.
+        # divide batch_size in half, because we double each output by flipping image.
         for offset in range(0, num_samples, batch_size):
-            batch_samples = samples[offset:offset+batch_size]
-            
+            batch_samples = samples[offset:offset + batch_size]
+
             images = []
             controls = []
             for fullpath in batch_samples:
@@ -98,10 +102,10 @@ def generator(samples, batch_size=32, perc_to_augment=0.5):
                         data = load_json(json_filename)
                         steering = float(data["user/angle"])
                         throttle = float(data["user/throttle"]) / 10.0
-                    else:    
+                    else:
                         data = parse_img_filepath(fullpath)
                         steering = float(data["steering"])
-                        throttle = float(data["throttle"])                          
+                        throttle = float(data["throttle"])
 
                     try:
                         image = Image.open(fullpath)
@@ -112,7 +116,7 @@ def generator(samples, batch_size=32, perc_to_augment=0.5):
                         print('failed to open', fullpath)
                         continue
 
-                    #PIL Image as a numpy array
+                    # PIL Image as a numpy array
                     image = np.array(image)
 
                     if len(shadows) > 0 and random.uniform(0.0, 1.0) < perc_to_augment:
@@ -120,7 +124,7 @@ def generator(samples, batch_size=32, perc_to_augment=0.5):
 
                     center_angle = steering
                     images.append(image)
-                    
+
                     if conf.num_outputs == 2:
                         controls.append([center_angle, throttle])
                     elif conf.num_outputs == 1:
@@ -133,7 +137,6 @@ def generator(samples, batch_size=32, perc_to_augment=0.5):
                     print("we threw an exception on:", fullpath)
                     yield [], []
 
-
             # final np array to submit to training
             X_train = np.array(images)
             y_train = np.array(controls)
@@ -144,11 +147,11 @@ def get_files(filemask):
     '''
     use a filemask and search a path recursively for matches
     '''
-    #matches = glob.glob(os.path.expanduser(filemask))
-    #return matches
+    # matches = glob.glob(os.path.expanduser(filemask))
+    # return matches
     filemask = os.path.expanduser(filemask)
     path, mask = os.path.split(filemask)
-    
+
     matches = []
     for root, dirnames, filenames in os.walk(path):
         for filename in fnmatch.filter(filenames, mask):
@@ -171,35 +174,35 @@ def train_test_split(lines, test_perc):
 
     return train, test
 
+
 def make_generators(inputs, limit=None, batch_size=32, aug_perc=0.0):
     '''
     load the job spec from the csv and create some generator for training
     '''
-    
-    #get the image/steering pairs from the csv files
+
+    # get the image/steering pairs from the csv files
     lines = get_files(inputs)
     print("found %d files" % len(lines))
 
     if limit is not None:
         lines = lines[:limit]
         print("limiting to %d files" % len(lines))
-    
+
     train_samples, validation_samples = train_test_split(lines, test_perc=0.2)
 
     print("num train/val", len(train_samples), len(validation_samples))
-    
+
     # compile and train the model using the generator function
     train_generator = generator(train_samples, batch_size=batch_size, perc_to_augment=aug_perc)
     validation_generator = generator(validation_samples, batch_size=batch_size, perc_to_augment=0.0)
-    
+
     n_train = len(train_samples)
     n_val = len(validation_samples)
-    
+
     return train_generator, validation_generator, n_train, n_val
 
 
 def go(model_name, epochs=50, inputs='./log/*.jpg', limit=None, aug_mult=1, aug_perc=0.0):
-
     print('working on model', model_name)
 
     '''
@@ -210,18 +213,18 @@ def go(model_name, epochs=50, inputs='./log/*.jpg', limit=None, aug_mult=1, aug_
     '''
     display layer summary and weights info
     '''
-    #models.show_model_summary(model)
+    # models.show_model_summary(model)
 
     callbacks = [
         keras.callbacks.EarlyStopping(monitor='val_loss', patience=conf.training_patience, verbose=0),
         keras.callbacks.ModelCheckpoint(model_name, monitor='val_loss', save_best_only=True, verbose=0),
     ]
-    
+
     batch_size = conf.training_batch_size
 
-
-    #Train on session images
-    train_generator, validation_generator, n_train, n_val = make_generators(inputs, limit=limit, batch_size=batch_size, aug_perc=aug_perc)
+    # Train on session images
+    train_generator, validation_generator, n_train, n_val = make_generators(inputs, limit=limit, batch_size=batch_size,
+                                                                            aug_perc=aug_perc)
 
     if n_train == 0:
         print('no training data found')
@@ -232,14 +235,14 @@ def go(model_name, epochs=50, inputs='./log/*.jpg', limit=None, aug_mult=1, aug_
 
     print("steps_per_epoch", steps_per_epoch, "validation_steps", validation_steps)
 
-    history = model.fit_generator(train_generator, 
-        steps_per_epoch = steps_per_epoch,
-        validation_data = validation_generator,
-        validation_steps = validation_steps,
-        epochs=epochs,
-        verbose=1,
-        callbacks=callbacks)
-    
+    history = model.fit_generator(train_generator,
+                                  steps_per_epoch=steps_per_epoch,
+                                  validation_data=validation_generator,
+                                  validation_steps=validation_steps,
+                                  epochs=epochs,
+                                  verbose=1,
+                                  callbacks=callbacks)
+
     try:
         if do_plot:
             # summarize history for loss
@@ -253,16 +256,20 @@ def go(model_name, epochs=50, inputs='./log/*.jpg', limit=None, aug_mult=1, aug_
     except:
         print("problems with loss graph")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='train script')
     parser.add_argument('model', type=str, help='model name')
     parser.add_argument('--epochs', type=int, default=conf.training_default_epochs, help='number of epochs')
     parser.add_argument('--inputs', default='../dataset/log/*.jpg', help='input mask to gather images')
     parser.add_argument('--limit', type=int, default=None, help='max number of images to train with')
-    parser.add_argument('--aug_mult', type=int, default=conf.training_default_aug_mult, help='how many more images to augment')
-    parser.add_argument('--aug_perc', type=float, default=conf.training_default_aug_percent, help='what percentage of images to augment 0 - 1')
+    parser.add_argument('--aug_mult', type=int, default=conf.training_default_aug_mult,
+                        help='how many more images to augment')
+    parser.add_argument('--aug_perc', type=float, default=conf.training_default_aug_percent,
+                        help='what percentage of images to augment 0 - 1')
     args = parser.parse_args()
-    
-    go(args.model, epochs=args.epochs, limit=args.limit, inputs=args.inputs, aug_mult=args.aug_mult, aug_perc=args.aug_perc)
 
-#python train.py mymodel_aug_90_x4_e200 --epochs=200 --aug_mult=4 --aug_perc=0.9
+    go(args.model, epochs=args.epochs, limit=args.limit, inputs=args.inputs, aug_mult=args.aug_mult,
+       aug_perc=args.aug_perc)
+
+# python train.py mymodel_aug_90_x4_e200 --epochs=200 --aug_mult=4 --aug_perc=0.9

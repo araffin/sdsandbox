@@ -4,40 +4,30 @@ author: Felix Yu
 date: 2018-09-12
 original: https://github.com/flyyufelix/donkey_rl/blob/master/donkey_rl/src/ddqn.py
 '''
-import os
-import sys
-import random
 import argparse
+import os
+import random
 import signal
-
-import numpy as np
-import gym
-import cv2
-
-import skimage as skimage
-from skimage import transform, color, exposure
-from skimage.transform import rotate
-from skimage.viewer import ImageViewer
-
+import sys
 from collections import deque
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.initializers import normal, identity
-from tensorflow.keras.models import model_from_json
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten
-from tensorflow.keras.layers import Conv2D, MaxPooling2D
+
+import cv2
+import gym
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras import backend as K
+from tensorflow.keras.layers import Conv2D
+from tensorflow.keras.layers import Dense, Activation, Flatten
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import Adam
 
-import donkey_gym
-import my_cv
+from . import my_cv
 
 EPISODES = 10000
-img_rows , img_cols = 80, 80
+img_rows, img_cols = 80, 80
 # Convert image into Black and white
-img_channels = 4 # We stack 4 frames
+img_channels = 4  # We stack 4 frames
+
 
 class DQNAgent:
 
@@ -45,7 +35,7 @@ class DQNAgent:
         self.t = 0
         self.max_Q = 0
         self.train = train
-        self.lane_detection = lane_detection # Set to True to train on images with segmented lane lines
+        self.lane_detection = lane_detection  # Set to True to train on images with segmented lane lines
 
         # Get size of state and action
         self.state_size = state_size
@@ -54,7 +44,7 @@ class DQNAgent:
         # These are hyper parameters for the DQN
         self.discount_factor = 0.99
         self.learning_rate = 1e-4
-        if (self.train):
+        if self.train:
             self.epsilon = 1.0
             self.initial_epsilon = 1.0
         else:
@@ -78,7 +68,8 @@ class DQNAgent:
 
     def build_model(self):
         model = Sequential()
-        model.add(Conv2D(24, (5, 5), strides=(2, 2), padding="same",input_shape=(img_rows,img_cols,img_channels)))  #80*80*4
+        model.add(Conv2D(24, (5, 5), strides=(2, 2), padding="same",
+                         input_shape=(img_rows, img_cols, img_channels)))  # 80*80*4
         model.add(Activation('relu'))
         model.add(Conv2D(32, (5, 5), strides=(2, 2), padding="same"))
         model.add(Activation('relu'))
@@ -93,24 +84,24 @@ class DQNAgent:
         model.add(Activation('relu'))
 
         # 15 categorical bins for Steering angles
-        model.add(Dense(15, activation="linear")) 
+        model.add(Dense(15, activation="linear"))
 
         adam = Adam(lr=self.learning_rate)
-        model.compile(loss='mse',optimizer=adam)
-        
+        model.compile(loss='mse', optimizer=adam)
+
         return model
 
-    def rgb2gray(self, rgb):
-        '''
+    @staticmethod
+    def rgb2gray(rgb):
+        """
         take a numpy rgb image return a new single channel image converted to greyscale
-        '''
-        return np.dot(rgb[...,:3], [0.299, 0.587, 0.114])
-
+        """
+        return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
 
     def process_image(self, obs):
-        
+
         if not self.lane_detection:
-            #obs = cv2.cvtColor(obs, cv2.COLOR_BGR2GRAY)
+            # obs = cv2.cvtColor(obs, cv2.COLOR_BGR2GRAY)
             obs = self.rgb2gray(obs)
             obs = cv2.resize(obs, (img_rows, img_cols))
             return obs
@@ -120,7 +111,7 @@ class DQNAgent:
             edges = my_cv.detect_edges(obs, low_threshold=50, high_threshold=150)
 
             rho = 0.8
-            theta = np.pi/180
+            theta = np.pi / 180
             threshold = 25
             min_line_len = 5
             max_line_gap = 10
@@ -129,21 +120,21 @@ class DQNAgent:
 
             left_lines, right_lines = my_cv.separate_lines(hough_lines)
 
-            filtered_right, filtered_left = [],[]
+            filtered_right, filtered_left = [], []
             if len(left_lines):
                 filtered_left = my_cv.reject_outliers(left_lines, cutoff=(-30.0, -0.1), lane='left')
             if len(right_lines):
-                filtered_right = my_cv.reject_outliers(right_lines,  cutoff=(0.1, 30.0), lane='right')
+                filtered_right = my_cv.reject_outliers(right_lines, cutoff=(0.1, 30.0), lane='right')
 
             lines = []
             if len(filtered_left) and len(filtered_right):
-                lines = np.expand_dims(np.vstack((np.array(filtered_left),np.array(filtered_right))),axis=0).tolist()
+                lines = np.expand_dims(np.vstack((np.array(filtered_left), np.array(filtered_right))), axis=0).tolist()
             elif len(filtered_left):
-                lines = np.expand_dims(np.expand_dims(np.array(filtered_left),axis=0),axis=0).tolist()
+                lines = np.expand_dims(np.expand_dims(np.array(filtered_left), axis=0), axis=0).tolist()
             elif len(filtered_right):
-                lines = np.expand_dims(np.expand_dims(np.array(filtered_right),axis=0),axis=0).tolist()
+                lines = np.expand_dims(np.expand_dims(np.array(filtered_right), axis=0), axis=0).tolist()
 
-            ret_img = np.zeros((80,80))
+            ret_img = np.zeros((80, 80))
 
             if len(lines):
                 try:
@@ -152,7 +143,6 @@ class DQNAgent:
                     pass
 
             return ret_img
-        
 
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
@@ -160,11 +150,11 @@ class DQNAgent:
     # Get action from model using epsilon-greedy policy
     def get_action(self, s_t):
         if np.random.rand() <= self.epsilon:
-            #print("Return Random Value")
-            #return random.randrange(self.action_size)
-            return np.random.uniform(-1,1)
+            # print("Return Random Value")
+            # return random.randrange(self.action_size)
+            return np.random.uniform(-1, 1)
         else:
-            #print("Return Max Q Prediction")
+            # print("Return Max Q Prediction")
             q_value = self.model.predict(s_t)
             # Convert q array to steering value
             return linear_unbin(q_value[0])
@@ -172,14 +162,13 @@ class DQNAgent:
     def replay_memory(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
         if self.epsilon > self.epsilon_min:
-            #self.epsilon *= self.epsilon_decay
+            # self.epsilon *= self.epsilon_decay
             self.epsilon -= (self.initial_epsilon - self.epsilon_min) / self.explore
-
 
     def train_replay(self):
         if len(self.memory) < self.train_start:
             return
-        
+
         batch_size = min(self.batch_size, len(self.memory))
         minibatch = random.sample(self.memory, batch_size)
 
@@ -205,6 +194,7 @@ class DQNAgent:
     # Save the model which is under training
     def save_model(self, name):
         self.model.save_weights(name)
+
 
 ## Utils Functions ##
 
@@ -254,14 +244,14 @@ def run_ddqn(args):
     sess = tf.Session(config=config)
     K.set_session(sess)
 
-    #we pass arguments to the donkey_gym init via these
+    # we pass arguments to the donkey_gym init via these
     os.environ['DONKEY_SIM_PATH'] = args.sim
     os.environ['DONKEY_SIM_PORT'] = str(args.port)
     os.environ['DONKEY_SIM_HEADLESS'] = str(args.headless)
 
     env = gym.make("donkey-generated-roads-v0")
 
-    #not working on windows...
+    # not working on windows...
     def signal_handler(signal, frame):
         print("catching ctrl+c")
         env.unwrapped.close()
@@ -273,12 +263,12 @@ def run_ddqn(args):
 
     # Get size of state and action from environment
     state_size = (img_rows, img_cols, img_channels)
-    action_size = env.action_space.n # Steering and Throttle
+    action_size = env.action_space.n  # Steering and Throttle
 
     try:
         agent = DQNAgent(state_size, action_size, train=not args.test, lane_detection=args.lane_detection)
 
-        throttle = 0.3 # Set throttle as constant value
+        throttle = 0.3  # Set throttle as constant value
 
         episodes = []
 
@@ -294,13 +284,13 @@ def run_ddqn(args):
             obs = env.reset()
 
             episode_len = 0
-        
+
             x_t = agent.process_image(obs)
 
-            s_t = np.stack((x_t,x_t,x_t,x_t),axis=2)
+            s_t = np.stack((x_t, x_t, x_t, x_t), axis=2)
             # In Keras, need to reshape
-            s_t = s_t.reshape(1, s_t.shape[0], s_t.shape[1], s_t.shape[2]) #1*80*80*4       
-            
+            s_t = s_t.reshape(1, s_t.shape[0], s_t.shape[1], s_t.shape[2])  # 1*80*80*4
+
             while not done:
 
                 # Get action for the current state and go one step in environment
@@ -310,8 +300,8 @@ def run_ddqn(args):
 
                 x_t1 = agent.process_image(next_obs)
 
-                x_t1 = x_t1.reshape(1, x_t1.shape[0], x_t1.shape[1], 1) #1x80x80x1
-                s_t1 = np.append(x_t1, s_t[:, :, :, :3], axis=3) #1x80x80x4
+                x_t1 = x_t1.reshape(1, x_t1.shape[0], x_t1.shape[1], 1)  # 1x80x80x1
+                s_t1 = np.append(x_t1, s_t[:, :, :, :3], axis=3)  # 1x80x80x4
 
                 # Save the sample <s, a, r, s'> to the replay memory
                 agent.replay_memory(s_t, np.argmax(linear_bin(steering)), reward, s_t1, done)
@@ -323,7 +313,8 @@ def run_ddqn(args):
                 agent.t = agent.t + 1
                 episode_len = episode_len + 1
                 if agent.t % 30 == 0:
-                    print("EPISODE",  e, "TIMESTEP", agent.t,"/ ACTION", action, "/ REWARD", reward, "/ EPISODE LENGTH", episode_len, "/ Q_MAX " , agent.max_Q)
+                    print("EPISODE", e, "TIMESTEP", agent.t, "/ ACTION", action, "/ REWARD", reward, "/ EPISODE LENGTH",
+                          episode_len, "/ Q_MAX ", agent.max_Q)
 
                 if done:
 
@@ -331,14 +322,13 @@ def run_ddqn(args):
                     agent.update_target_model()
 
                     episodes.append(e)
-                    
 
                     # Save model for each episode
                     if agent.train:
                         agent.save_model(args.model)
 
                     print("episode:", e, "  memory length:", len(agent.memory),
-                        "  epsilon:", agent.epsilon, " episode length:", episode_len)
+                          "  epsilon:", agent.epsilon, " episode length:", episode_len)
     except KeyboardInterrupt:
         print("stopping run...")
     finally:
@@ -346,19 +336,15 @@ def run_ddqn(args):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description='ddqn')
-    parser.add_argument('--sim', type=str, default="manual", help='path to unity simulator. maybe be left at manual if you would like to start the sim on your own.')
+    parser.add_argument('--sim', type=str, default="manual",
+                        help='path to unity simulator. maybe be left at manual if you would like to start the sim on your own.')
     parser.add_argument('--model', type=str, default="rl_driver.h5", help='path to model')
     parser.add_argument('--test', action="store_true", help='agent uses learned model to navigate env')
     parser.add_argument('--lane_detection', action="store_true", help='train on images with segmented lane lines')
     parser.add_argument('--headless', type=int, default=0, help='1 to supress graphics')
     parser.add_argument('--port', type=int, default=9091, help='port to use for websockets')
-    
 
     args = parser.parse_args()
 
     run_ddqn(args)
-    
-
-

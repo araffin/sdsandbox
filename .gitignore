@@ -10,3 +10,9 @@ sdsim/Temp
 sdsim/.vs
 sdsim/Build
 dataset
+builds/
+.idea/
+__pycache__/
+*.csproj
+sdsim/Packages/
+sdsim/ProjectSettings/PresetManager.asset
