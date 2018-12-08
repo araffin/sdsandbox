@@ -16,3 +16,4 @@ __pycache__/
 *.csproj
 sdsim/Packages/
 sdsim/ProjectSettings/PresetManager.asset
+.DS_STORE
